@@ -1,0 +1,15 @@
+{
+  "id": "mathanraaj/audioguard-2026-training",
+  "title": "AudioGuardMP 2026 - Multimodal Training Pipeline",
+  "code_file": "train_on_kaggle.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "docker_image_pinning_type": "latest"
+}
