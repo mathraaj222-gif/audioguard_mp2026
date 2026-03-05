@@ -36,6 +36,7 @@ import time
 import zipfile
 import logging
 import subprocess
+import torch
 from pathlib import Path
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -52,7 +53,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 WORKING_DIR = Path("/kaggle/working")
-CODE_DIR = Path("/kaggle/input/audioguard-2026-training")   # Kaggle input directory
+def _find_code_dir() -> Path:
+    """Auto-detect the Kaggle input directory for this kernel."""
+    kaggle_input = Path("/kaggle/input")
+    # Prefer the correct slug name
+    preferred = kaggle_input / "audioguardmp-2026-multimodal-training-pipeline"
+    if preferred.exists():
+        return preferred
+    # Fallback: scan for any subdirectory (in case slug changes again)
+    if kaggle_input.exists():
+        subdirs = [d for d in kaggle_input.iterdir() if d.is_dir()]
+        if subdirs:
+            return subdirs[0]
+    # Last resort: old slug
+    return kaggle_input / "audioguard-2026-training"
+
+CODE_DIR = _find_code_dir()   # Kaggle input directory (auto-detected)
 
 # Output directories
 TCA_HATEBERT_OUTPUT  = WORKING_DIR / "outputs" / "hatebert_finetuned"
@@ -72,7 +88,7 @@ def env_check():
     logger.info("PHASE 0: Environment Check")
     logger.info("=" * 70)
 
-    import torch
+    # torch imported at top
     logger.info(f"PyTorch version: {torch.__version__}")
     logger.info(f"CUDA available: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
@@ -80,7 +96,11 @@ def env_check():
             props = torch.cuda.get_device_properties(i)
             logger.info(f"  GPU {i}: {props.name}  ({props.total_memory // 1024**2} MB VRAM)")
     logger.info(f"Working dir: {WORKING_DIR}")
-    logger.info(f"Code dir:    {CODE_DIR}")
+    logger.info(f"Code dir:    {CODE_DIR}  (exists: {CODE_DIR.exists()})")
+    if not CODE_DIR.exists():
+        kaggle_input = Path("/kaggle/input")
+        available = list(kaggle_input.iterdir()) if kaggle_input.exists() else []
+        logger.warning(f"CODE_DIR not found! Available in /kaggle/input: {available}")
     logger.info("✓ Environment check passed.")
 
 
@@ -161,18 +181,15 @@ def run_tca_training():
     # 3a. HateBERT on Davidson dataset
     logger.info("\n--- 3a. HateBERT (Davidson Hate Speech) ---")
     t0 = time.time()
-    from train_hatebert import run_hatebert_training
-    run_hatebert_training(output_dir=str(TCA_HATEBERT_OUTPUT))
+    from train_hatebert import run_training as run_hatebert_training
+    run_hatebert_training() # No args, uses CONFIG inside
     logger.info(f"✓ HateBERT done in {(time.time()-t0)/60:.1f} min.")
 
     # 3b. DeBERTa-v3-Large on NLI CSV
     logger.info("\n--- 3b. DeBERTa-v3-Large (NLI Ethics CSV) ---")
     t0 = time.time()
-    from train_deberta import run_deberta_training
-    run_deberta_training(
-        output_dir=str(TCA_DEBERTA_OUTPUT),
-        nli_csv_path=str(NLI_CSV_PATH),
-    )
+    from train_deberta_large import run_training as run_deberta_training
+    run_deberta_training()
     logger.info(f"✓ DeBERTa done in {(time.time()-t0)/60:.1f} min.")
 
     logger.info("✓ TCA training complete.")
@@ -191,23 +208,15 @@ def run_ser_training():
     # 4a. Whisper-Large-v3
     logger.info("\n--- 4a. Whisper-Large-v3 SER ---")
     t0 = time.time()
-    from train_whisper import run_whisper_ser_training
-    run_whisper_ser_training(
-        output_dir=str(SER_WHISPER_OUTPUT),
-        ravdess_cache=str(RAVDESS_CACHE),
-        tess_cache=str(TESS_CACHE),
-    )
+    from train_whisper_ser import run_training as run_whisper_ser_training
+    run_whisper_ser_training()
     logger.info(f"✓ Whisper SER done in {(time.time()-t0)/60:.1f} min.")
 
     # 4b. Wav2Vec-BERT 2.0
     logger.info("\n--- 4b. Wav2Vec-BERT 2.0 SER ---")
     t0 = time.time()
-    from train_wav2vec_bert import run_wav2vec_bert_ser_training
-    run_wav2vec_bert_ser_training(
-        output_dir=str(SER_WAV2VEC_OUTPUT),
-        ravdess_cache=str(RAVDESS_CACHE),
-        tess_cache=str(TESS_CACHE),
-    )
+    from train_wav2vec_bert import run_training as run_wav2vec_bert_ser_training
+    run_wav2vec_bert_ser_training()
     logger.info(f"✓ Wav2Vec-BERT SER done in {(time.time()-t0)/60:.1f} min.")
 
     logger.info("✓ SER training complete.")
@@ -252,7 +261,8 @@ def package_artifacts():
     manifest = []
     for p in sorted(WORKING_DIR.rglob("*")):
         if p.is_file():
-            manifest.append({"path": str(p.relative_to(WORKING_DIR)), "size_mb": round(p.stat().st_size / 1024**2, 2)})
+            size_mb = float(p.stat().st_size) / (1024**2)
+            manifest.append({"path": str(p.relative_to(WORKING_DIR)), "size_mb": round(size_mb, 2)})
 
     with open(WORKING_DIR / "output_manifest.json", "w") as f:
         json.dump(manifest, f, indent=2)

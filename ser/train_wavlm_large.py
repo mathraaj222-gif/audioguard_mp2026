@@ -1,10 +1,9 @@
 """
-train_wav2vec_bert.py — S3: Wav2Vec-BERT 2.0 SER (Scalar Mix)
-===========================================================
-Model : facebook/w2v-bert-2.0
+train_wavlm_large.py — S5: WavLM-Large SER
+=========================================
+Model : microsoft/wavlm-large
 Task  : 7-class emotion classification
 Data  : RAVDESS + TESS
-Logic : Scalar mixing of 24 layers + Attention Pooling
 """
 
 import os
@@ -14,11 +13,10 @@ import time
 import random
 import numpy as np
 import torch
-import torch.nn as nn
 from pathlib import Path
 from transformers import (
     AutoFeatureExtractor,
-    Wav2Vec2BertModel,
+    WavLMForSequenceClassification,
     TrainingArguments,
     Trainer,
     EarlyStoppingCallback,
@@ -38,56 +36,15 @@ logger = logging.getLogger(__name__)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 CONFIG = {
-    "model_id": "S3",
-    "model_name": "facebook/w2v-bert-2.0",
+    "model_id": "S5",
+    "model_name": "microsoft/wavlm-large",
     "track": "SER",
-    "epochs": 5,
-    "lr_transformer": 2e-5,
-    "lr_head": 1e-4,
+    "epochs": 3,
+    "lr": 1e-5,
     "batch_size": 8,
-    "gradient_accumulation_steps": 4,
-    "output_dir": "./outputs/S3_wav2vec_bert/",
+    "gradient_accumulation_steps": 2,
+    "output_dir": "./outputs/S5_wavlm_large/",
 }
-
-class Wav2VecBertSERModel(nn.Module):
-    def __init__(self, model_name, num_labels=7):
-        super().__init__()
-        self.w2v_bert = Wav2Vec2BertModel.from_pretrained(model_name, output_hidden_states=True)
-        # Freeze CNN feature extractor
-        self.w2v_bert.feature_extractor._freeze_parameters()
-        
-        num_layers = self.w2v_bert.config.num_hidden_layers + 1 # 24 + 1
-        encoder_dim = self.w2v_bert.config.hidden_size # 1024
-        
-        # Scalar mix weights
-        self.layer_weights = nn.Parameter(torch.ones(num_layers))
-        # Attention Pooling
-        self.attention_pool = nn.Linear(encoder_dim, 1)
-        # Head: Linear(1024, 7)
-        self.head = nn.Linear(encoder_dim, num_labels)
-
-    def forward(self, input_features, attention_mask=None, labels=None):
-        outputs = self.w2v_bert(input_features, attention_mask=attention_mask)
-        hidden_states = outputs.hidden_states # List of (B, T, D)
-        
-        # Scalar mix
-        stacked = torch.stack(hidden_states, dim=0) # (L, B, T, D)
-        weights = torch.softmax(self.layer_weights, dim=0).view(-1, 1, 1, 1)
-        mixed = (stacked * weights).sum(dim=0) # (B, T, D)
-        
-        # Attention Pooling
-        attn_weights = torch.softmax(self.attention_pool(mixed), dim=1)
-        pooled = torch.sum(attn_weights * mixed, dim=1) # (B, D)
-        
-        logits = self.head(pooled)
-        
-        loss = None
-        if labels is not None:
-            loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(logits, labels)
-            
-        from transformers.modeling_outputs import SequenceClassifierOutput
-        return SequenceClassifierOutput(loss=loss, logits=logits)
 
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
@@ -105,6 +62,12 @@ def run_training():
     output_path = Path(CONFIG["output_dir"])
     output_path.mkdir(parents=True, exist_ok=True)
 
+    # VRAM Guard
+    if torch.cuda.is_available():
+        vram = torch.cuda.get_device_properties(0).total_memory
+        if vram < 10e9:
+            logger.warning(f"⚠️ LOW VRAM WARNING: {vram/(1024**3):.2f} GB detected. WavLM-Large may OOM.")
+
     logger.info(f"Starting {CONFIG['model_id']} training...")
     
     # 1. Data
@@ -114,13 +77,16 @@ def run_training():
     def preprocess_function(examples):
         audio = [x["array"] for x in examples["audio"]]
         inputs = feature_extractor(audio, sampling_rate=TARGET_SAMPLE_RATE, return_tensors="pt", padding=True, truncation=True, max_length=TARGET_SAMPLE_RATE * 10)
-        examples["input_features"] = inputs.input_features
-        return examples
+        return inputs
 
     tokenized_ds = ds.map(preprocess_function, batched=True, batch_size=8, remove_columns=["audio", "source"])
 
     # 2. Model
-    model = Wav2VecBertSERModel(CONFIG["model_name"], num_labels=7)
+    model = WavLMForSequenceClassification.from_pretrained(
+        CONFIG["model_name"], 
+        num_labels=7,
+        ignore_mismatched_sizes=True
+    )
     model.to(DEVICE)
 
     # 3. Training Args
@@ -132,21 +98,15 @@ def run_training():
         gradient_accumulation_steps=CONFIG["gradient_accumulation_steps"],
         evaluation_strategy="epoch",
         save_strategy="epoch",
+        learning_rate=CONFIG["lr"],
         load_best_model_at_end=True,
         metric_for_best_model="f1_macro",
         greater_is_better=True,
         logging_steps=10,
         report_to="none",
         fp16=torch.cuda.is_available(),
+        gradient_checkpointing=True,
     )
-
-    # Differential Learning Rates
-    optimizer = torch.optim.AdamW([
-        {"params": model.head.parameters(), "lr": CONFIG["lr_head"]},
-        {"params": model.layer_weights, "lr": CONFIG["lr_transformer"]},
-        {"params": model.attention_pool.parameters(), "lr": CONFIG["lr_head"]},
-        {"params": model.w2v_bert.parameters(), "lr": CONFIG["lr_transformer"]},
-    ])
 
     # 4. Trainer
     trainer = Trainer(
@@ -154,8 +114,8 @@ def run_training():
         args=training_args,
         train_dataset=tokenized_ds["train"],
         eval_dataset=tokenized_ds["validation"],
+        tokenizer=feature_extractor,
         compute_metrics=compute_metrics,
-        optimizers=(optimizer, None),
         callbacks=[EarlyStoppingCallback(early_stopping_patience=2)],
     )
 

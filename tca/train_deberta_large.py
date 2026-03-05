@@ -1,9 +1,9 @@
 """
-train_hatebert.py — T2: HateBERT Fine-tuning on Davidson Dataset
-===============================================================
-Model  : GroNLP/hateBERT
-Task   : 3-class text classification (hate, offensive, neither)
-Data   : Davidson et al. (2017)
+train_deberta_large.py — T3: DeBERTa-v3-Large on NLI Ethics Dataset
+==================================================================
+Model : microsoft/deberta-v3-large
+Task  : 3-class NLI (entailment, contradiction, neutral)
+Data  : hate_speech_ethics_dataset_300.csv
 """
 
 import os
@@ -23,8 +23,7 @@ from transformers import (
     DataCollatorWithPadding,
 )
 from sklearn.metrics import accuracy_score, f1_score, precision_recall_fscore_support
-from sklearn.utils.class_weight import compute_class_weight
-from dataset_loader import load_davidson, DAVIDSON_LABEL_MAP, DAVIDSON_NUM_LABELS
+from dataset_loader import load_nli_csv, NLI_LABEL_MAP, NLI_NUM_LABELS
 
 # Seeds
 random.seed(42)
@@ -38,30 +37,16 @@ logger = logging.getLogger(__name__)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 CONFIG = {
-    "model_id": "T2",
-    "model_name": "GroNLP/hateBERT",
+    "model_id": "T3",
+    "model_name": "microsoft/deberta-v3-large",
     "track": "TCA",
-    "epochs": 5,
-    "lr": 2e-5,
-    "batch_size": 32,
-    "weight_decay": 0.01,
-    "warmup_ratio": 0.1,
-    "max_length": 128,
-    "output_dir": "./outputs/T2_hatebert/",
+    "epochs": 10,
+    "lr": 1e-5,
+    "batch_size": 8,
+    "gradient_accumulation_steps": 4,
+    "max_length": 256,
+    "output_dir": "./outputs/T3_deberta_large/",
 }
-
-class WeightedTrainer(Trainer):
-    def __init__(self, class_weights, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.class_weights = torch.tensor(class_weights, dtype=torch.float).to(DEVICE)
-
-    def compute_loss(self, model, inputs, return_outputs=False):
-        labels = inputs.get("labels")
-        outputs = model(**inputs)
-        logits = outputs.get("logits")
-        loss_fct = torch.nn.CrossEntropyLoss(weight=self.class_weights)
-        loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
-        return (loss, outputs) if return_outputs else loss
 
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
@@ -79,26 +64,24 @@ def run_training():
     output_path = Path(CONFIG["output_dir"])
     output_path.mkdir(parents=True, exist_ok=True)
 
+    # VRAM Guard
+    if torch.cuda.is_available():
+        vram = torch.cuda.get_device_properties(0).total_memory
+        if vram < 10e9:
+            logger.warning(f"⚠️ LOW VRAM WARNING: {vram/(1024**3):.2f} GB detected. DeBERTa-Large may OOM.")
+
     logger.info(f"Starting {CONFIG['model_id']} training on {DEVICE}...")
     
     # 1. Load Data
-    dataset = load_davidson(binary=False)
+    dataset = load_nli_csv()
     
-    # Compute class weights
-    train_labels = dataset["train"]["label"]
-    class_weights = compute_class_weight(
-        class_weight="balanced",
-        classes=np.unique(train_labels),
-        y=train_labels
-    )
-    logger.info(f"Computed class weights: {class_weights}")
-
     # 2. Tokenize
     tokenizer = AutoTokenizer.from_pretrained(CONFIG["model_name"])
     
     def tokenize_function(examples):
         return tokenizer(
-            examples["text"],
+            examples["premise"],
+            examples["hypothesis"],
             truncation=True,
             max_length=CONFIG["max_length"],
             padding=False,
@@ -109,7 +92,7 @@ def run_training():
     # 3. Model
     model = AutoModelForSequenceClassification.from_pretrained(
         CONFIG["model_name"], 
-        num_labels=DAVIDSON_NUM_LABELS
+        num_labels=NLI_NUM_LABELS
     )
     model.to(DEVICE)
 
@@ -121,20 +104,21 @@ def run_training():
         learning_rate=CONFIG["lr"],
         per_device_train_batch_size=CONFIG["batch_size"],
         per_device_eval_batch_size=CONFIG["batch_size"],
+        gradient_accumulation_steps=CONFIG["gradient_accumulation_steps"],
         num_train_epochs=CONFIG["epochs"],
-        weight_decay=CONFIG["weight_decay"],
-        warmup_ratio=CONFIG["warmup_ratio"],
+        weight_decay=0.01,
         load_best_model_at_end=True,
         metric_for_best_model="f1_macro",
         greater_is_better=True,
-        logging_steps=50,
+        logging_dir=str(output_path / "logs"),
+        logging_steps=5,
         report_to="none",
         fp16=torch.cuda.is_available(),
+        gradient_checkpointing=True, # Mandatory
     )
 
     # 5. Trainer
-    trainer = WeightedTrainer(
-        class_weights=class_weights,
+    trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=tokenized_datasets["train"],
@@ -142,7 +126,7 @@ def run_training():
         tokenizer=tokenizer,
         data_collator=DataCollatorWithPadding(tokenizer),
         compute_metrics=compute_metrics,
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=2)],
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=3)],
     )
 
     # 6. Train
@@ -151,8 +135,8 @@ def run_training():
     train_time = (time.time() - start_time) / 60
     
     # 7. Evaluate
-    logger.info("Evaluating on test set...")
-    metrics = trainer.evaluate(tokenized_datasets["test"])
+    logger.info("Evaluating on val set...")
+    metrics = trainer.evaluate()
     
     # Peak VRAM
     peak_vram = 0
@@ -176,7 +160,7 @@ def run_training():
         "train_time_minutes": round(train_time, 2),
         "peak_vram_gb": round(peak_vram, 2),
         "epochs_trained": CONFIG["epochs"],
-        "dataset": "Davidson ~24k tweets",
+        "dataset": "NLI CSV 300 rows",
         "saved_model_path": str(output_path)
     }
     

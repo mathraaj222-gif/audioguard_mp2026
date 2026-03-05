@@ -1,10 +1,10 @@
 """
-train_wav2vec_bert.py — S3: Wav2Vec-BERT 2.0 SER (Scalar Mix)
-===========================================================
-Model : facebook/w2v-bert-2.0
+train_whisper_ser.py — S2: Whisper-Large-v3 SER (Encoder Only)
+=============================================================
+Model : openai/whisper-large-v3 (Encoder Only)
 Task  : 7-class emotion classification
 Data  : RAVDESS + TESS
-Logic : Scalar mixing of 24 layers + Attention Pooling
+Logic : Attention pooling + specific freezing logic
 """
 
 import os
@@ -17,12 +17,13 @@ import torch
 import torch.nn as nn
 from pathlib import Path
 from transformers import (
-    AutoFeatureExtractor,
-    Wav2Vec2BertModel,
+    WhisperFeatureExtractor,
+    WhisperModel,
     TrainingArguments,
     Trainer,
     EarlyStoppingCallback,
 )
+from datasets import Audio
 from sklearn.metrics import accuracy_score, f1_score, precision_recall_fscore_support
 from dataset_loader import load_ser_datasets, NUM_EMOTIONS, TARGET_SAMPLE_RATE
 
@@ -38,46 +39,43 @@ logger = logging.getLogger(__name__)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 CONFIG = {
-    "model_id": "S3",
-    "model_name": "facebook/w2v-bert-2.0",
+    "model_id": "S2",
+    "model_name": "openai/whisper-large-v3",
     "track": "SER",
     "epochs": 5,
-    "lr_transformer": 2e-5,
     "lr_head": 1e-4,
+    "lr_encoder": 2e-5,
     "batch_size": 8,
     "gradient_accumulation_steps": 4,
-    "output_dir": "./outputs/S3_wav2vec_bert/",
+    "output_dir": "./outputs/S2_whisper_ser/",
 }
 
-class Wav2VecBertSERModel(nn.Module):
+class WhisperSERModel(nn.Module):
     def __init__(self, model_name, num_labels=7):
         super().__init__()
-        self.w2v_bert = Wav2Vec2BertModel.from_pretrained(model_name, output_hidden_states=True)
-        # Freeze CNN feature extractor
-        self.w2v_bert.feature_extractor._freeze_parameters()
+        # Load full model but we'll only use encoder
+        self.whisper = WhisperModel.from_pretrained(model_name)
+        encoder_dim = self.whisper.config.d_model # 1280
         
-        num_layers = self.w2v_bert.config.num_hidden_layers + 1 # 24 + 1
-        encoder_dim = self.w2v_bert.config.hidden_size # 1024
+        # Head: Linear(1280, 256) -> ReLU -> Dropout(0.1) -> Linear(256, 7)
+        self.attention_pooling = nn.Linear(encoder_dim, 1)
+        self.head = nn.Sequential(
+            nn.Linear(encoder_dim, 256),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(256, num_labels)
+        )
         
-        # Scalar mix weights
-        self.layer_weights = nn.Parameter(torch.ones(num_layers))
-        # Attention Pooling
-        self.attention_pool = nn.Linear(encoder_dim, 1)
-        # Head: Linear(1024, 7)
-        self.head = nn.Linear(encoder_dim, num_labels)
+        # Discard decoder entirely
+        del self.whisper.decoder
 
-    def forward(self, input_features, attention_mask=None, labels=None):
-        outputs = self.w2v_bert(input_features, attention_mask=attention_mask)
-        hidden_states = outputs.hidden_states # List of (B, T, D)
-        
-        # Scalar mix
-        stacked = torch.stack(hidden_states, dim=0) # (L, B, T, D)
-        weights = torch.softmax(self.layer_weights, dim=0).view(-1, 1, 1, 1)
-        mixed = (stacked * weights).sum(dim=0) # (B, T, D)
+    def forward(self, input_features, labels=None):
+        encoder_outputs = self.whisper.encoder(input_features)
+        last_hidden_state = encoder_outputs.last_hidden_state # (B, T, D)
         
         # Attention Pooling
-        attn_weights = torch.softmax(self.attention_pool(mixed), dim=1)
-        pooled = torch.sum(attn_weights * mixed, dim=1) # (B, D)
+        weights = torch.softmax(self.attention_pooling(last_hidden_state), dim=1)
+        pooled = torch.sum(weights * last_hidden_state, dim=1)
         
         logits = self.head(pooled)
         
@@ -101,26 +99,51 @@ def compute_metrics(eval_pred):
         "recall_macro": recall,
     }
 
+class WhisperTrainer(Trainer):
+    def training_step(self, model, inputs):
+        # Specific freezing logic: Freeze encoder for epochs 1-2
+        # self.state.epoch is 1-indexed here or 0? 
+        # epoch is updated after the call. We'll check current epoch.
+        current_epoch = self.state.epoch
+        if current_epoch < 2:
+            for param in model.whisper.encoder.parameters():
+                param.requires_grad = False
+        else:
+            # Unfreeze last 6 layers
+            for param in model.whisper.encoder.parameters():
+                param.requires_grad = False
+            for layer in model.whisper.encoder.layers[-6:]:
+                for param in layer.parameters():
+                    param.requires_grad = True
+        return super().training_step(model, inputs)
+
 def run_training():
     output_path = Path(CONFIG["output_dir"])
     output_path.mkdir(parents=True, exist_ok=True)
+
+    # VRAM Guard
+    if torch.cuda.is_available():
+        vram = torch.cuda.get_device_properties(0).total_memory
+        if vram < 10e9:
+            logger.warning(f"⚠️ LOW VRAM WARNING: {vram/(1024**3):.2f} GB detected. Whisper-Large may OOM.")
 
     logger.info(f"Starting {CONFIG['model_id']} training...")
     
     # 1. Data
     ds = load_ser_datasets()
-    feature_extractor = AutoFeatureExtractor.from_pretrained(CONFIG["model_name"])
+    feature_extractor = WhisperFeatureExtractor.from_pretrained(CONFIG["model_name"])
 
     def preprocess_function(examples):
+        # Whisper expects 30s mel spectrogram
         audio = [x["array"] for x in examples["audio"]]
-        inputs = feature_extractor(audio, sampling_rate=TARGET_SAMPLE_RATE, return_tensors="pt", padding=True, truncation=True, max_length=TARGET_SAMPLE_RATE * 10)
+        inputs = feature_extractor(audio, sampling_rate=TARGET_SAMPLE_RATE, return_tensors="pt")
         examples["input_features"] = inputs.input_features
         return examples
 
-    tokenized_ds = ds.map(preprocess_function, batched=True, batch_size=8, remove_columns=["audio", "source"])
+    tokenized_ds = ds.map(preprocess_function, batched=True, batch_size=10, remove_columns=["audio", "source"])
 
     # 2. Model
-    model = Wav2VecBertSERModel(CONFIG["model_name"], num_labels=7)
+    model = WhisperSERModel(CONFIG["model_name"], num_labels=7)
     model.to(DEVICE)
 
     # 3. Training Args
@@ -138,18 +161,18 @@ def run_training():
         logging_steps=10,
         report_to="none",
         fp16=torch.cuda.is_available(),
+        gradient_checkpointing=True,
     )
 
     # Differential Learning Rates
     optimizer = torch.optim.AdamW([
         {"params": model.head.parameters(), "lr": CONFIG["lr_head"]},
-        {"params": model.layer_weights, "lr": CONFIG["lr_transformer"]},
-        {"params": model.attention_pool.parameters(), "lr": CONFIG["lr_head"]},
-        {"params": model.w2v_bert.parameters(), "lr": CONFIG["lr_transformer"]},
+        {"params": model.attention_pooling.parameters(), "lr": CONFIG["lr_head"]},
+        {"params": model.whisper.encoder.parameters(), "lr": CONFIG["lr_encoder"]},
     ])
 
     # 4. Trainer
-    trainer = Trainer(
+    trainer = WhisperTrainer(
         model=model,
         args=training_args,
         train_dataset=tokenized_ds["train"],

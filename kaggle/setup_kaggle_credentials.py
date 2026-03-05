@@ -81,7 +81,7 @@ def check_credentials() -> bool:
 
     # 3. Validate JSON structure
     try:
-        with open(KAGGLE_JSON, "r") as f:
+        with open(KAGGLE_JSON, "r", encoding="utf-8") as f:
             creds = json.load(f)
     except json.JSONDecodeError as e:
         print(f"✗ kaggle.json is not valid JSON: {e}")
@@ -124,7 +124,7 @@ def check_credentials() -> bool:
     try:
         result = subprocess.run(
             ["kaggle", "kernels", "list", "--mine", "--page-size", "1"],
-            capture_output=True, text=True, timeout=30
+            capture_output=True, text=True, timeout=30, encoding="utf-8", errors="replace"
         )
         if result.returncode == 0:
             print("✓ Kaggle CLI connection successful!")
@@ -141,13 +141,13 @@ def check_credentials() -> bool:
     # 6. Check kernel-metadata.json for placeholder
     metadata_path = Path(__file__).parent / "kernel-metadata.json"
     if metadata_path.exists():
-        with open(metadata_path) as f:
+        with open(metadata_path, encoding="utf-8") as f:
             meta = json.load(f)
         kernel_id = meta.get("id", "")
         if "REPLACE_WITH_YOUR_KAGGLE_USERNAME" in kernel_id:
             correct_id = kernel_id.replace("REPLACE_WITH_YOUR_KAGGLE_USERNAME", username)
             meta["id"] = correct_id
-            with open(metadata_path, "w") as f:
+            with open(metadata_path, "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=2)
             print(f"\n✓ Auto-updated kernel-metadata.json:")
             print(f"  id: {correct_id}")

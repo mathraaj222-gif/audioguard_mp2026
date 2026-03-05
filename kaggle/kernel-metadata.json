@@ -1,5 +1,5 @@
 {
-  "id": "mathanraaj/audioguard-2026-training",
+  "id": "mathanraaj/audioguardmp-2026-multimodal-training-pipeline",
   "title": "AudioGuardMP 2026 - Multimodal Training Pipeline",
   "code_file": "train_on_kaggle.py",
   "language": "python",

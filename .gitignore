@@ -36,3 +36,6 @@ datasets/
 
 # Kaggle temp
 kaggle/tmp/
+
+# Model outputs
+outputs/
