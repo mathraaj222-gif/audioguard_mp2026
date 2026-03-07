@@ -208,6 +208,33 @@ Kaggle free-tier kernels allow up to **12 hours** per session.
 | OOM on Whisper local training | Reduce `batch_size` to 2 or use `--gradient_checkpointing` |
 | DeBERTa SentencePiece error | `pip install sentencepiece protobuf` |
 
+
+## Kaggle Integration & Synchronization
+
+To streamline working with Kaggle, you have three options to keep your code in sync:
+
+### 1. Native GitHub-to-Dataset Sync (Recommended) ⭐
+Kaggle can pull your entire GitHub repository automatically into a Dataset.
+1.  Go to **Kaggle > Datasets > New Dataset**.
+2.  Select **"Remote URL"** or **"GitHub"** (if available).
+3.  Enter your GitHub Repo URL: `https://github.com/your-username/AudioGuardMP_2026`.
+4.  Set a periodic update (e.g., Daily) or trigger manually.
+5.  In your Kaggle Notebook, add this Dataset as input. All folders (`ser/`, `tca/`) will be available at `/kaggle/input/audioguardmp-2026/`.
+
+### 2. Automated Push via GitHub Actions
+We've set up a [workflow](file:///.github/workflows/push_to_kaggle.yml) that pushes your code to Kaggle whenever you push to `main`.
+- **Setup**:
+    1.  Go to your GitHub Repo **Settings > Secrets and variables > Actions**.
+    2.  Add `KAGGLE_USERNAME` (your Kaggle username).
+    3.  Add `KAGGLE_KEY` (your Kaggle API Key from `kaggle.json`).
+- **Trigger**: Every `git push origin main` will update your Kaggle Kernel.
+
+### 3. Local Push Script
+Use the updated [push_to_kaggle.py](file:///c:/AudioGuard%20FYP/AudioGuardMP_2026/kaggle/push_to_kaggle.py) to push manually from your local machine:
+```powershell
+python kaggle/push_to_kaggle.py --session 1
+```
+
 ---
 
 *AudioGuardMP_2026 — Built 2026-03-01*

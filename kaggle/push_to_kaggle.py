@@ -46,13 +46,11 @@ def update_metadata(session_num):
     logger.info(f"Updated metadata to run {script}")
     return True
 
-def push_kernel():
+def push_kernel(path="kaggle"):
     """Push the kernel using Kaggle CLI."""
-    logger.info("Pushing kernel to Kaggle...")
+    logger.info(f"Pushing kernel to Kaggle from {path}...")
     try:
-        # We need to be in the directory where kernel-metadata.json is?
-        # Kaggle CLI looks for it in the current directory or specified path.
-        result = subprocess.run(["kaggle", "kernels", "push", "-p", "kaggle"], check=True, capture_output=True, text=True)
+        result = subprocess.run(["kaggle", "kernels", "push", "-p", path], check=True, capture_output=True, text=True)
         logger.info(result.stdout)
         return True
     except subprocess.CalledProcessError as e:
