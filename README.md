@@ -226,7 +226,7 @@ We've set up a [workflow](file:///.github/workflows/push_to_kaggle.yml) that pus
 - **Setup**:
     1.  Go to your GitHub Repo **Settings > Secrets and variables > Actions**.
     2.  Add `KAGGLE_USERNAME` (your Kaggle username).
-    3.  Add `KAGGLE_KEY` (your Kaggle API Key from `kaggle.json`).
+    3.  Add `KAGGLE_KEY` (your Kaggle API Key from `kaggle.json`). 
 - **Trigger**: Every `git push origin main` will update your Kaggle Kernel.
 
 ### 3. Local Push Script

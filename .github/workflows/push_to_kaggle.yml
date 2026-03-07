@@ -29,10 +29,12 @@ jobs:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
         run: |
+          if [ -z "$KAGGLE_USERNAME" ] || [ -z "$KAGGLE_KEY" ]; then
+            echo "Error: KAGGLE_USERNAME or KAGGLE_KEY is not set in GitHub Secrets."
+            echo "Please go to Settings > Secrets and variables > Actions to add them."
+            exit 1
+          fi
           mkdir -p ~/.kaggle
           echo "{\"username\":\"$KAGGLE_USERNAME\",\"key\":\"$KAGGLE_KEY\"}" > ~/.kaggle/kaggle.json
           chmod 600 ~/.kaggle/kaggle.json
-          # Push the kernel using the metadata in the kaggle/ folder
-          # Note: The kernel will pull the updated code from the GitHub repo if using Native Sync,
-          # or we can push the whole project structure here.
           kaggle kernels push -p kaggle
