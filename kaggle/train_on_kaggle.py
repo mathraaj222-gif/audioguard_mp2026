@@ -39,9 +39,9 @@ import subprocess
 import torch
 from pathlib import Path
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # ENVIRONMENT SETUP
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -80,9 +80,9 @@ RAVDESS_CACHE = WORKING_DIR / "datasets" / "ravdess"
 TESS_CACHE    = WORKING_DIR / "datasets" / "tess"
 NLI_CSV_PATH  = CODE_DIR / "datasets" / "hate_speech_ethics_dataset_300.csv"
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # PHASE 0: ENVIRONMENT CHECK
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 def env_check():
     logger.info("=" * 70)
     logger.info("PHASE 0: Environment Check")
@@ -101,12 +101,12 @@ def env_check():
         kaggle_input = Path("/kaggle/input")
         available = list(kaggle_input.iterdir()) if kaggle_input.exists() else []
         logger.warning(f"CODE_DIR not found! Available in /kaggle/input: {available}")
-    logger.info("✓ Environment check passed.")
+    logger.info("[OK] Environment check passed.")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # PHASE 1: INSTALL DEPENDENCIES
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 def install_dependencies():
     logger.info("=" * 70)
     logger.info("PHASE 1: Installing Dependencies")
@@ -131,12 +131,12 @@ def install_dependencies():
     if result.returncode != 0:
         logger.error(f"pip install failed:\n{result.stderr}")
         raise RuntimeError("Dependency installation failed.")
-    logger.info("✓ Dependencies installed.")
+    logger.info("[OK] Dependencies installed.")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # PHASE 2: PREPARE DATASETS
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 def prepare_datasets():
     logger.info("=" * 70)
     logger.info("PHASE 2: Preparing Datasets")
@@ -161,16 +161,16 @@ def prepare_datasets():
                  "--unzip", "-p", str(TESS_CACHE)],
                 check=True
             )
-            logger.info("✓ TESS downloaded.")
+            logger.info("[OK] TESS downloaded.")
         except Exception as e:
             logger.warning(f"TESS download via Kaggle CLI failed: {e}. Continuing without TESS.")
 
-    logger.info("✓ Dataset preparation complete.")
+    logger.info("[OK] Dataset preparation complete.")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # PHASE 3: TCA TRAINING
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 def run_tca_training():
     logger.info("=" * 70)
     logger.info("PHASE 3: Text Content Analysis Training")
@@ -183,21 +183,21 @@ def run_tca_training():
     t0 = time.time()
     from train_hatebert import run_training as run_hatebert_training
     run_hatebert_training() # No args, uses CONFIG inside
-    logger.info(f"✓ HateBERT done in {(time.time()-t0)/60:.1f} min.")
+    logger.info(f"[OK] HateBERT done in {(time.time()-t0)/60:.1f} min.")
 
     # 3b. DeBERTa-v3-Large on NLI CSV
     logger.info("\n--- 3b. DeBERTa-v3-Large (NLI Ethics CSV) ---")
     t0 = time.time()
     from train_deberta_large import run_training as run_deberta_training
     run_deberta_training()
-    logger.info(f"✓ DeBERTa done in {(time.time()-t0)/60:.1f} min.")
+    logger.info(f"[OK] DeBERTa done in {(time.time()-t0)/60:.1f} min.")
 
-    logger.info("✓ TCA training complete.")
+    logger.info("[OK] TCA training complete.")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # PHASE 4: SER TRAINING
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 def run_ser_training():
     logger.info("=" * 70)
     logger.info("PHASE 4: Speech Emotion Recognition Training")
@@ -210,21 +210,21 @@ def run_ser_training():
     t0 = time.time()
     from train_whisper_ser import run_training as run_whisper_ser_training
     run_whisper_ser_training()
-    logger.info(f"✓ Whisper SER done in {(time.time()-t0)/60:.1f} min.")
+    logger.info(f"[OK] Whisper SER done in {(time.time()-t0)/60:.1f} min.")
 
     # 4b. Wav2Vec-BERT 2.0
     logger.info("\n--- 4b. Wav2Vec-BERT 2.0 SER ---")
     t0 = time.time()
     from train_wav2vec_bert import run_training as run_wav2vec_bert_ser_training
     run_wav2vec_bert_ser_training()
-    logger.info(f"✓ Wav2Vec-BERT SER done in {(time.time()-t0)/60:.1f} min.")
+    logger.info(f"[OK] Wav2Vec-BERT SER done in {(time.time()-t0)/60:.1f} min.")
 
-    logger.info("✓ SER training complete.")
+    logger.info("[OK] SER training complete.")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # PHASE 5: PACKAGE ARTIFACTS
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 def package_artifacts():
     logger.info("=" * 70)
     logger.info("PHASE 5: Packaging Model Artifacts")
@@ -255,7 +255,7 @@ def package_artifacts():
     summary_path = WORKING_DIR / "training_summary.json"
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)
-    logger.info(f"\n✓ Training summary saved to: {summary_path}")
+    logger.info(f"\n[OK] Training summary saved to: {summary_path}")
 
     # Create a manifest of all output files
     manifest = []
@@ -268,19 +268,19 @@ def package_artifacts():
         json.dump(manifest, f, indent=2)
 
     logger.info(f"Output manifest saved: {WORKING_DIR}/output_manifest.json")
-    logger.info("✓ All artifacts packaged.")
+    logger.info("[OK] All artifacts packaged.")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # MAIN ENTRY POINT
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     total_start = time.time()
 
-    logger.info("╔══════════════════════════════════════════════════════════════════╗")
-    logger.info("║       AudioGuardMP_2026 — Multimodal Training Pipeline          ║")
-    logger.info("║       Kaggle T4 x2 GPU Kernel                                   ║")
-    logger.info("╚══════════════════════════════════════════════════════════════════╝")
+    logger.info("+------------------------------------------------------------------+")
+    logger.info("|       AudioGuardMP_2026 - Multimodal Training Pipeline          |")
+    logger.info("|       Kaggle T4 x2 GPU Kernel                                   |")
+    logger.info("+------------------------------------------------------------------+")
 
     try:
         env_check()
@@ -292,11 +292,11 @@ if __name__ == "__main__":
 
         total_time = (time.time() - total_start) / 60
         logger.info(f"\n{'='*70}")
-        logger.info(f"✅ ALL TRAINING COMPLETE in {total_time:.1f} minutes.")
+        logger.info(f"SUCCESS: ALL TRAINING COMPLETE in {total_time:.1f} minutes.")
         logger.info(f"   All models saved under /kaggle/working/outputs/")
         logger.info(f"   Download them via: kaggle kernels output <username>/audioguard-2026-training")
         logger.info(f"{'='*70}")
 
     except Exception as e:
-        logger.error(f"\n❌ Training pipeline FAILED: {e}", exc_info=True)
+        logger.error(f"\nERROR: Training pipeline FAILED: {e}", exc_info=True)
         sys.exit(1)

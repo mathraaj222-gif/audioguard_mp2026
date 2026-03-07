@@ -29,18 +29,16 @@ def update_metadata(session_num):
         metadata = json.load(f)
 
     if session_num == 1:
-        script = "kaggle/session1_tca_and_ser_light.py"
-        metadata["title"] = "AudioGuard Training Session 1"
+        script = "session1_tca_and_ser_light.py"
     elif session_num == 2:
-        script = "kaggle/session2_ser_heavy.py"
-        metadata["title"] = "AudioGuard Training Session 2"
+        script = "session2_ser_heavy.py"
     else:
-        script = "kaggle/train_on_kaggle.py"
-        metadata["title"] = "AudioGuard Full Training"
+        script = "train_on_kaggle.py"
 
+    metadata["title"] = "AudioGuardMP 2026 Multimodal Training Pipeline"
     metadata["code_file"] = script
     
-    with open(metadata_path, "w") as f:
+    with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
     
     logger.info(f"Updated metadata to run {script}")
@@ -54,7 +52,11 @@ def push_kernel(path="kaggle"):
         logger.info(result.stdout)
         return True
     except subprocess.CalledProcessError as e:
-        logger.error(f"Failed to push kernel: {e.stderr}")
+        logger.error(f"Failed to push kernel (Result Code {e.returncode})")
+        if e.stdout:
+            logger.error(f"STDOUT: {e.stdout}")
+        if e.stderr:
+            logger.error(f"STDERR: {e.stderr}")
         return False
 
 def main():
@@ -71,7 +73,7 @@ def main():
     # 2. Push
     if args.push:
         if push_kernel():
-            logger.info("🎉 Kernel pushed successfully! Monitor progress at https://www.kaggle.com/kernels")
+            logger.info("Kernel pushed successfully! Monitor progress at https://www.kaggle.com/kernels")
         else:
             logger.error("Failed to push kernel.")
 
