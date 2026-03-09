@@ -12,6 +12,7 @@ import json
 import argparse
 import subprocess
 import logging
+import shutil
 import time
 from pathlib import Path
 
@@ -44,8 +45,34 @@ def update_metadata(session_num):
     logger.info(f"Updated metadata to run {script}")
     return True
 
-def push_kernel(path="kaggle"):
+def bundle_folders(target_dir: Path, folders: list):
+    """Copy source folders into the target directory for bundling."""
+    root_dir = Path(".").resolve()
+    for folder in folders:
+        src = root_dir / folder
+        dst = target_dir / folder
+        if src.exists():
+            logger.info(f"Bundling {folder}...")
+            # Use dirs_exist_ok=True (Python 3.8+) to handle existing directories
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+        else:
+            logger.warning(f"Source folder {folder} not found, skipping.")
+
+def cleanup_bundle(target_dir: Path, folders: list):
+    """Remove bundled folders from the target directory."""
+    for folder in folders:
+        dst = target_dir / folder
+        if dst.exists() and dst.is_dir():
+            logger.info(f"Cleaning up {folder}...")
+            shutil.rmtree(dst)
+
+def push_kernel(path="kaggle", bundle=True):
     """Push the kernel using Kaggle CLI."""
+    folders_to_bundle = ["tca", "ser", "datasets"]
+    
+    if bundle:
+        bundle_folders(Path(path), folders_to_bundle)
+
     logger.info(f"Pushing kernel to Kaggle from {path}...")
     try:
         result = subprocess.run(["kaggle", "kernels", "push", "-p", path], check=True, capture_output=True, text=True)
@@ -58,11 +85,15 @@ def push_kernel(path="kaggle"):
         if e.stderr:
             logger.error(f"STDERR: {e.stderr}")
         return False
+    finally:
+        if bundle:
+            cleanup_bundle(Path(path), folders_to_bundle)
 
 def main():
     parser = argparse.ArgumentParser(description="Push AudioGuard to Kaggle")
     parser.add_argument("--session", type=int, choices=[1, 2], help="Session number to push")
     parser.add_argument("--push", action="store_true", default=True, help="Actually push to Kaggle")
+    parser.add_argument("--no-bundle", action="store_true", help="Skip bundling tca/ser/datasets folders")
     
     args = parser.parse_args()
 
@@ -72,7 +103,7 @@ def main():
 
     # 2. Push
     if args.push:
-        if push_kernel():
+        if push_kernel(bundle=not args.no_bundle):
             logger.info("Kernel pushed successfully! Monitor progress at https://www.kaggle.com/kernels")
         else:
             logger.error("Failed to push kernel.")
