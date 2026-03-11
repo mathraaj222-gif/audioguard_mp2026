@@ -15,23 +15,24 @@ logger = logging.getLogger(__name__)
 
 def _find_code_dir() -> Path:
     """Auto-detect where the source code (tca/ser folders) is located on Kaggle."""
-    # 1. Check if we pushed everything directly to working dir (unlikely with -p kaggle)
-    if (Path.cwd() / "tca").exists():
-        return Path.cwd()
+    cwd = Path.cwd()
+    if (cwd / "tca").exists():
+        return cwd
     
-    # 2. Check Kaggle Input (Dataset method - recommended)
+    # Check /kaggle/input recursively
     kaggle_input = Path("/kaggle/input")
     if kaggle_input.exists():
-        # Look for our specific dataset name
-        preferred = kaggle_input / "audioguardmp-2026"
-        if preferred.exists():
-            return preferred
-        # Fallback: find any directory with 'tca' in it
-        for d in kaggle_input.iterdir():
-            if d.is_dir() and (d / "tca").exists():
-                return d
+        # Optimization: Look for 'tca' folder specifically
+        for p in kaggle_input.rglob("tca"):
+            if p.is_dir():
+                return p.parent
                 
-    return Path.cwd() # Default failure
+        # Fallback to the specific path provided by the user if rglob fails or for speed
+        user_path = kaggle_input / "datasets/mathanraaj/audioguars-mp2026"
+        if user_path.exists() and (user_path / "tca").exists():
+            return user_path
+                
+    return cwd # Default failure
 
 CODE_DIR = _find_code_dir()
 logger.info(f"Using CODE_DIR: {CODE_DIR}")

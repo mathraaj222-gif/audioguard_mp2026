@@ -55,18 +55,24 @@ logger = logging.getLogger(__name__)
 WORKING_DIR = Path("/kaggle/working")
 def _find_code_dir() -> Path:
     """Auto-detect the Kaggle input directory for this kernel."""
+    cwd = Path.cwd()
+    if (cwd / "tca").exists():
+        return cwd
+    
+    # Check /kaggle/input recursively
     kaggle_input = Path("/kaggle/input")
-    # Prefer the correct slug name
-    preferred = kaggle_input / "audioguardmp-2026-multimodal-training-pipeline"
-    if preferred.exists():
-        return preferred
-    # Fallback: scan for any subdirectory (in case slug changes again)
     if kaggle_input.exists():
-        subdirs = [d for d in kaggle_input.iterdir() if d.is_dir()]
-        if subdirs:
-            return subdirs[0]
-    # Last resort: old slug
-    return kaggle_input / "audioguard-2026-training"
+        # Optimization: Look for 'tca' folder specifically
+        for p in kaggle_input.rglob("tca"):
+            if p.is_dir():
+                return p.parent
+                
+        # Fallback to the specific path provided by the user
+        user_path = kaggle_input / "datasets/mathanraaj/audioguars-mp2026"
+        if user_path.exists() and (user_path / "tca").exists():
+            return user_path
+                
+    return cwd
 
 CODE_DIR = _find_code_dir()   # Kaggle input directory (auto-detected)
 
