@@ -16,23 +16,49 @@ logger = logging.getLogger(__name__)
 def _find_code_dir() -> Path:
     """Auto-detect where the source code (tca/ser folders) is located on Kaggle."""
     cwd = Path.cwd()
+    logger.info(f"__file__: {__file__}")
+    logger.info(f"Searching for 'ser' folder. Starting at CWD: {cwd}")
+    
     if (cwd / "ser").exists():
+        logger.info(f"FOUND 'ser' in CWD: {cwd}")
         return cwd
     
-    # Check /kaggle/input recursively
+    # Check /kaggle/input
     kaggle_input = Path("/kaggle/input")
-    if kaggle_input.exists():
-        # Optimization: Look for 'ser' folder specifically
-        for p in kaggle_input.rglob("ser"):
-            if p.is_dir():
-                # We need the parent that contains 'ser', 'tca', etc.
-                return p.parent
+    if not kaggle_input.exists():
+        logger.warning("/kaggle/input does not exist. Only searching CWD.")
+        return cwd
+
+    # 1. Try common explicit paths (fast) - PRIORITIZE USER REPORTED PATH
+    possible_paths = [
+        Path("/kaggle/input/datasets/mathanraaj/audioguars-mp2026"), # Exact user path
+        kaggle_input / "audioguars-mp2026",
+        kaggle_input / "audioguardmp-2026",
+        kaggle_input / "audioguard-mp2026",
+        kaggle_input / "mathanraaj/audioguars-mp2026",
+    ]
+    
+    for p in possible_paths:
+        logger.info(f"Checking potential path: {p}")
+        if p.exists() and (p / "ser").exists():
+            logger.info(f"FOUND 'ser' in: {p}")
+            return p
+
+    # 2. Shallow search (medium)
+    logger.info("Shallow searching /kaggle/input subdirectories...")
+    for d in kaggle_input.iterdir():
+        if d.is_dir() and (d / "ser").exists():
+            logger.info(f"FOUND 'ser' in shallow search: {d}")
+            return d
+
+    # 3. Deep search (slow - fallback)
+    logger.info("Deep searching /kaggle/input (this may take a moment)...")
+    for p in kaggle_input.rglob("ser"):
+        if p.is_dir():
+            logger.info(f"FOUND 'ser' via rglob: {p.parent}")
+            return p.parent
                 
-        # Fallback to the specific path provided by the user
-        user_path = kaggle_input / "datasets/mathanraaj/audioguars-mp2026"
-        if user_path.exists() and (user_path / "ser").exists():
-            return user_path
-                
+    logger.error("Could not find 'ser' folder anywhere in /kaggle/working or /kaggle/input")
     return cwd
 
 CODE_DIR = _find_code_dir()
@@ -50,13 +76,30 @@ MODELS_TO_RUN = [
 def run_script(script_path, model_id):
     if not script_path.exists():
         logger.error(f"[MISSING] {model_id} script not found at {script_path}")
-        logger.error("TIP: Ensure you have added your GitHub Repo as a 'Dataset' to this Kaggle Notebook.")
         return
 
     logger.info(f"[START] Heavy {model_id} ({script_path})...")
+    
+    # 1. Prepare environment with PYTHONPATH
+    env = os.environ.copy()
+    tca_path = str(CODE_DIR / "tca")
+    ser_path = str(CODE_DIR / "ser")
+    
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    new_pythonpath = f"{tca_path}{os.pathsep}{ser_path}"
+    if existing_pythonpath:
+        new_pythonpath = f"{new_pythonpath}{os.pathsep}{existing_pythonpath}"
+    
+    env["PYTHONPATH"] = new_pythonpath
+    
     try:
-        # Run from project root
-        result = subprocess.run([sys.executable, str(script_path)], check=True, cwd=str(CODE_DIR))
+        # 2. Run from Writable Working Dir
+        result = subprocess.run(
+            [sys.executable, str(script_path)], 
+            check=True, 
+            cwd="/kaggle/working",
+            env=env
+        )
         if result.returncode == 0:
             logger.info(f"[OK] {model_id} finished successfully.")
         else:
@@ -68,11 +111,6 @@ def main():
     logger.info("=== STARTING KAGGLE SESSION 2 (HEAVY SER) ===")
     
     Path("/kaggle/working/outputs").mkdir(exist_ok=True, parents=True)
-
-    if not (CODE_DIR / "ser").exists():
-        logger.error("!!! CRITICAL: 'ser' folder not found !!!")
-        logger.error("Please add your code as a Dataset to the notebook.")
-        return
 
     for script, mid in MODELS_TO_RUN:
         run_script(script, mid)

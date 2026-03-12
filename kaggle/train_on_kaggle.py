@@ -56,22 +56,63 @@ WORKING_DIR = Path("/kaggle/working")
 def _find_code_dir() -> Path:
     """Auto-detect the Kaggle input directory for this kernel."""
     cwd = Path.cwd()
+    logger.info(f"__file__: {__file__}")
+    logger.info(f"Searching for 'tca' folder (marker). Starting at CWD: {cwd}")
+    
     if (cwd / "tca").exists():
+        logger.info(f"FOUND 'tca' marker in CWD: {cwd}")
         return cwd
     
-    # Check /kaggle/input recursively
+    # Check /kaggle/input
     kaggle_input = Path("/kaggle/input")
-    if kaggle_input.exists():
-        # Optimization: Look for 'tca' folder specifically
-        for p in kaggle_input.rglob("tca"):
-            if p.is_dir():
-                return p.parent
+    if not kaggle_input.exists():
+        logger.warning("/kaggle/input does not exist. Only searching CWD.")
+        return cwd
+
+    # 1. Try common explicit paths (fast) - PRIORITIZE USER REPORTED PATH
+    possible_paths = [
+        Path("/kaggle/input/datasets/mathanraaj/audioguars-mp2026"), # Exact user path
+        kaggle_input / "audioguars-mp2026",
+        kaggle_input / "audioguardmp-2026-multimodal-training-pipeline",
+        kaggle_input / "audioguardmp-2026",
+        kaggle_input / "audioguard-mp2026",
+        kaggle_input / "mathanraaj/audioguars-mp2026",
+    ]
+    
+    for p in possible_paths:
+        logger.info(f"Checking potential path: {p}")
+        if p.exists() and (p / "tca").exists():
+            logger.info(f"FOUND 'tca' marker in: {p}")
+            return p
+
+    # 2. Shallow search (medium)
+    logger.info("Shallow searching /kaggle/input subdirectories...")
+    for d in kaggle_input.iterdir():
+        if d.is_dir() and (d / "tca").exists():
+            logger.info(f"FOUND 'tca' marker in shallow search: {d}")
+            return d
+
+    # 3. Deep search (slow - fallback)
+    logger.info("Deep searching /kaggle/input (this may take a moment)...")
+    for p in kaggle_input.rglob("tca"):
+        if p.is_dir():
+            logger.info(f"FOUND 'tca' marker via rglob: {p.parent}")
+            return p.parent
                 
-        # Fallback to the specific path provided by the user
-        user_path = kaggle_input / "datasets/mathanraaj/audioguars-mp2026"
-        if user_path.exists() and (user_path / "tca").exists():
-            return user_path
-                
+    logger.error("Could not find source code directory ('tca' marker not found) in /kaggle/working or /kaggle/input")
+    
+    # --- ULTRA DIAGNOSTICS ---
+    logger.info("=== DIAGNOSTIC FILE DUMP ===")
+    try:
+        logger.info(f"Contents of /kaggle/working: {os.listdir('/kaggle/working')}")
+        if Path('/kaggle/input').exists():
+            logger.info(f"Contents of /kaggle/input: {os.listdir('/kaggle/input')}")
+            for d in Path('/kaggle/input').iterdir():
+                if d.is_dir():
+                    logger.info(f"Contents of {d}: {os.listdir(d)}")
+    except Exception as e:
+        logger.error(f"Diagnostic dump failed: {e}")
+    
     return cwd
 
 CODE_DIR = _find_code_dir()   # Kaggle input directory (auto-detected)
@@ -149,8 +190,13 @@ def prepare_datasets():
     logger.info("=" * 70)
 
     # Add code directories to Python path
-    sys.path.insert(0, str(CODE_DIR / "tca"))
-    sys.path.insert(0, str(CODE_DIR / "ser"))
+    tca_path = str(CODE_DIR / "tca")
+    ser_path = str(CODE_DIR / "ser")
+    sys.path.insert(0, tca_path)
+    sys.path.insert(0, ser_path)
+    
+    # Also set PYTHONPATH for subprocesses
+    os.environ["PYTHONPATH"] = f"{tca_path}{os.pathsep}{ser_path}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"
 
     # RAVDESS download (handled inside ser/dataset_loader.py)
     logger.info("Checking RAVDESS cache...")
@@ -182,7 +228,8 @@ def run_tca_training():
     logger.info("PHASE 3: Text Content Analysis Training")
     logger.info("=" * 70)
 
-    sys.path.insert(0, str(CODE_DIR / "tca"))
+    # Ensure we are in /kaggle/working for writable outputs
+    os.chdir("/kaggle/working")
 
     # 3a. HateBERT on Davidson dataset
     logger.info("\n--- 3a. HateBERT (Davidson Hate Speech) ---")
@@ -209,7 +256,8 @@ def run_ser_training():
     logger.info("PHASE 4: Speech Emotion Recognition Training")
     logger.info("=" * 70)
 
-    sys.path.insert(0, str(CODE_DIR / "ser"))
+    # Ensure we are in /kaggle/working
+    os.chdir("/kaggle/working")
 
     # 4a. Whisper-Large-v3
     logger.info("\n--- 4a. Whisper-Large-v3 SER ---")

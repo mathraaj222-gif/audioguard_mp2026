@@ -1,0 +1,162 @@
+"""
+train_lstm_baseline.py — S1: Custom LSTM on MFCCs (TESS Only)
+=============================================================
+Model : LSTM (TensorFlow/Keras)
+Data  : TESS only
+Labels: 7 emotions
+Features: MFCC (40, 216)
+"""
+
+import os
+import json
+import logging
+import time
+import random
+import numpy as np
+import librosa
+import tensorflow as tf
+from tensorflow.keras import layers, models, callbacks
+from pathlib import Path
+from sklearn.model_selection import train_test_split
+from dataset_loader import load_tess, TARGET_SAMPLE_RATE, ID2EMOTION
+
+# Seeds
+random.seed(42)
+np.random.seed(42)
+tf.random.set_seed(42)
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
+
+CONFIG = {
+    "model_id": "S1",
+    "model_name": "LSTM-Baseline",
+    "track": "SER",
+    "epochs": 100,
+    "batch_size": 32,
+    "n_mfcc": 40,
+    "max_frames": 216,
+    "output_dir": "./outputs/S1_lstm_baseline/",
+}
+
+def extract_mfcc(path: str) -> np.ndarray:
+    """Extract and pad/truncate MFCCs to (max_frames, n_mfcc)."""
+    y, sr = librosa.load(path, sr=TARGET_SAMPLE_RATE)
+    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=CONFIG["n_mfcc"])
+    mfcc = mfcc.T # (frames, n_mfcc)
+    
+    if len(mfcc) > CONFIG["max_frames"]:
+        mfcc = mfcc[:CONFIG["max_frames"], :]
+    else:
+        pad_width = CONFIG["max_frames"] - len(mfcc)
+        mfcc = np.pad(mfcc, ((0, pad_width), (0, 0)), mode="constant")
+    
+    return mfcc
+
+def run_training():
+    output_path = Path(CONFIG["output_dir"])
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    logger.info("Loading TESS data for S1 baseline...")
+    samples = load_tess()
+    if not samples:
+        logger.error("No TESS samples loaded for S1. Skipping.")
+        return
+
+    # Extract features
+    X, y = [], []
+    for s in samples:
+        try:
+            X.append(extract_mfcc(s["path"]))
+            y.append(s["label"])
+        except Exception as e:
+            logger.warning(f"Failed to process {s['path']}: {e}")
+
+    X = np.array(X)
+    y = np.array(y)
+    
+    # 7-class to categorical
+    y_cat = tf.keras.utils.to_categorical(y, num_classes=7)
+
+    X_train, X_val, y_train, y_val = train_test_split(X, y_cat, test_size=0.2, random_state=42, stratify=y)
+
+    # Model Architecture
+    model = models.Sequential([
+        layers.Input(shape=(CONFIG["max_frames"], CONFIG["n_mfcc"])),
+        layers.LSTM(256, return_sequences=True),
+        layers.LSTM(128),
+        layers.Dense(64, activation="relu"),
+        layers.Dropout(0.3),
+        layers.Dense(7, activation="softmax")
+    ])
+
+    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+                  loss="categorical_crossentropy",
+                  metrics=["accuracy"])
+
+    model.summary()
+
+    # Callbacks
+    early_stop = callbacks.EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True)
+    
+    start_time = time.time()
+    history = model.fit(
+        X_train, y_train,
+        validation_data=(X_val, y_val),
+        epochs=CONFIG["epochs"],
+        batch_size=CONFIG["batch_size"],
+        callbacks=[early_stop],
+        verbose=1
+    )
+    train_time = (time.time() - start_time) / 60
+
+    # Evaluate
+    val_loss, val_acc = model.evaluate(X_val, y_val, verbose=0)
+    
+    # Simple F1 Calculation (Macro)
+    y_pred = model.predict(X_val)
+    preds = np.argmax(y_pred, axis=-1)
+    true = np.argmax(y_val, axis=-1)
+    from sklearn.metrics import f1_score, precision_recall_fscore_support
+    precision, recall, f1, _ = precision_recall_fscore_support(true, preds, average="macro")
+
+    # Save
+    h5_path = output_path / "lstm_ser_baseline.h5"
+    keras_path = output_path / "lstm_ser_baseline.keras"
+    model.save(str(h5_path))
+    model.save(str(keras_path))
+
+    # Peak VRAM (TF method)
+    peak_vram = 0 # Difficult to track exactly like torch in cross-platform without pynvml
+    
+    # Unified results format
+    summary = {
+        "model_id": CONFIG["model_id"],
+        "model_name": CONFIG["model_name"],
+        "track": CONFIG["track"],
+        "accuracy": round(float(val_acc), 4),
+        "f1_macro": round(float(f1), 4),
+        "precision_macro": round(float(precision), 4),
+        "recall_macro": round(float(recall), 2),
+        "train_time_minutes": round(train_time, 2),
+        "peak_vram_gb": 0.0,
+        "epochs_trained": len(history.history["loss"]),
+        "dataset": "TESS only",
+        "saved_model_path": str(output_path)
+    }
+    
+    summary_file = Path("./outputs/training_summary.json")
+    all_summaries = []
+    if summary_file.exists():
+        with open(summary_file, "r") as f:
+            all_summaries = json.load(f)
+            if not isinstance(all_summaries, list): all_summaries = [all_summaries]
+    
+    all_summaries.append(summary)
+    with open(summary_file, "w") as f:
+        json.dump(all_summaries, f, indent=2)
+
+    logger.info(f"✓ {CONFIG['model_id']} training complete.")
+
+if __name__ == "__main__":
+    run_training()
