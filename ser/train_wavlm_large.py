@@ -52,7 +52,7 @@ def compute_metrics(eval_pred):
     precision, recall, f1, _ = precision_recall_fscore_support(labels, preds, average="macro")
     acc = accuracy_score(labels, preds)
     return {
-        "accuracy": acc,
+        "accuracy": round(float(acc), 2),
         "f1_macro": f1,
         "precision_macro": precision,
         "recall_macro": recall,
@@ -133,15 +133,16 @@ def run_training():
     trainer.save_model(str(output_path))
     feature_extractor.save_pretrained(str(output_path))
     
-    # Unified summary
+    # Unified summary — evaluate ONCE, extract all metrics
+    test_metrics = trainer.evaluate(tokenized_ds["test"])
     summary = {
         "model_id": CONFIG["model_id"],
         "model_name": CONFIG["model_name"],
         "track": CONFIG["track"],
-        "accuracy": round(trainer.evaluate(tokenized_ds["test"])["eval_accuracy"], 4),
-        "f1_macro": round(trainer.evaluate(tokenized_ds["test"])["eval_f1_macro"], 4),
-        "precision_macro": round(trainer.evaluate(tokenized_ds["test"])["eval_precision_macro"], 4),
-        "recall_macro": round(trainer.evaluate(tokenized_ds["test"])["eval_recall_macro"], 4),
+        "accuracy": round(test_metrics["eval_accuracy"], 4),
+        "f1_macro": round(test_metrics["eval_f1_macro"], 4),
+        "precision_macro": round(test_metrics["eval_precision_macro"], 4),
+        "recall_macro": round(test_metrics["eval_recall_macro"], 4),
         "train_time_minutes": round(train_time, 2),
         "peak_vram_gb": round(peak_vram, 2),
         "epochs_trained": CONFIG["epochs"],

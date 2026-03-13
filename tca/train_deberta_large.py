@@ -61,7 +61,7 @@ def compute_metrics(eval_pred):
     }
 
 def run_training():
-    output_path = Path(CONFIG["output_dir"])
+    output_path = Path(str(CONFIG["output_dir"]))
     output_path.mkdir(parents=True, exist_ok=True)
 
     # VRAM Guard
@@ -115,6 +115,7 @@ def run_training():
         report_to="none",
         fp16=torch.cuda.is_available(),
         gradient_checkpointing=True, # Mandatory
+        gradient_checkpointing_kwargs={"use_reentrant": False},
     )
 
     # 5. Trainer
@@ -153,7 +154,7 @@ def run_training():
         "model_id": CONFIG["model_id"],
         "model_name": CONFIG["model_name"],
         "track": CONFIG["track"],
-        "accuracy": round(metrics["eval_accuracy"], 4),
+        "accuracy": round(float(metrics["eval_accuracy"]), 4),
         "f1_macro": round(metrics["eval_f1_macro"], 4),
         "precision_macro": round(metrics["eval_precision_macro"], 4),
         "recall_macro": round(metrics["eval_recall_macro"], 4),

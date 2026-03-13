@@ -27,7 +27,7 @@ AudioGuardMP_2026/
 │   ├── kernel-metadata.json     # Kaggle kernel configuration
 │   ├── setup_kaggle_credentials.py  # Credential validator + auto-patcher
 │   └── push_to_kaggle.py        # One-command push + status poller
-├── datasets/
+├── data/
 │   └── hate_speech_ethics_dataset_300.csv  # NLI ethics dataset
 ├── .env.example                 # Environment variable template
 └── README.md

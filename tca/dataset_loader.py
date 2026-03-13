@@ -100,21 +100,25 @@ def load_davidson(
 # Custom NLI Ethics CSV Dataset
 # ─────────────────────────────────────────────
 
-NLI_LABEL_MAP = {0: "entailment", 1: "contradiction", 2: "neutral"}
+NLI_LABEL_MAP = {0: "entailment", 1: "neutral", 2: "contradiction"}
 NLI_NUM_LABELS = 3
 
 # Default path relative to this file's location
-_DEFAULT_NLI_CSV = Path(__file__).resolve().parent.parent / "datasets" / "hate_speech_ethics_dataset_300.csv"
+_DEFAULT_NLI_CSV = Path(__file__).resolve().parent.parent / "data" / "hate_speech_ethics_dataset_300.csv"
 
 
 def load_nli_csv(
     csv_path: str | Path | None = None,
-    test_size: float = 0.20,
+    val_size: float = 0.15,
+    test_size: float = 0.15,
     seed: int = 42,
 ) -> DatasetDict:
     """
-    Load the custom NLI ethics CSV and return train/validation DatasetDict.
-    Labels: 0=entailment, 1=contradiction, 2=neutral
+    Load the custom NLI ethics CSV and return train/validation/test DatasetDict.
+    Labels: 0=entailment, 1=neutral, 2=contradiction
+    
+    CRITICAL: Uses proper 3-way stratified split (70/15/15) instead of
+    duplicating validation as test.
     """
     if csv_path:
         path = Path(csv_path)
@@ -122,20 +126,15 @@ def load_nli_csv(
         # Robust path detection for NLI CSV
         filename = "hate_speech_ethics_dataset_300.csv"
         
-        # 1. Check relative to this file (Local/Bundle)
-        # When bundled: /kaggle/input/dataset-name/tca/dataset_loader.py
-        # CSV is at: /kaggle/input/dataset-name/data_bundle/hate_...
-        # OR: /kaggle/input/dataset-name/datasets/hate_...
-        
         parent_dir = Path(__file__).resolve().parent.parent
         candidates = [
             # 0. Same directory as this script (works when CSV is copied into tca/ on Kaggle)
             Path(__file__).resolve().parent / filename,
             parent_dir / "data_bundle" / filename,
-            parent_dir / "datasets" / filename,
+            parent_dir / "data" / filename,
             Path("/kaggle/input/audioguars-mp2026/data_bundle") / filename,
-            Path("/kaggle/input/audioguars-mp2026/datasets") / filename,
-            Path("/kaggle/working/datasets") / filename,
+            Path("/kaggle/input/audioguars-mp2026/data") / filename,
+            Path("/kaggle/working/data") / filename,
             _DEFAULT_NLI_CSV,
         ]
         
@@ -147,7 +146,6 @@ def load_nli_csv(
                 break
         
         if path is None:
-            # Final fallback: search recursively for the filename from parent
             logger.warning(f"NLI CSV not found in standard paths. Searching under {parent_dir}...")
             for p in parent_dir.rglob(filename):
                 path = p
@@ -160,26 +158,37 @@ def load_nli_csv(
     df = pd.read_csv(path)
     df.columns = [c.strip().lower() for c in df.columns]
     
-    # Requirement: 300 rows, balanced 100 per class
     # Columns: premise, hypothesis, label
     df = df[["premise", "hypothesis", "label"]].dropna()
     df["label"] = df["label"].astype(int)
 
+    # === Validation assertions ===
+    assert len(df) >= 100, f"NLI CSV has only {len(df)} rows — expected ~300"
+    unique_labels = set(df["label"].unique())
+    assert unique_labels == {0, 1, 2}, f"Expected labels {{0,1,2}}, got {unique_labels}"
+    assert "premise" in df.columns and "hypothesis" in df.columns, "Missing premise/hypothesis columns"
+
     logger.info(f"Loaded NLI CSV from {path} — {len(df)} rows")
     logger.info(f"Label distribution:\n{df['label'].value_counts().to_string()}")
 
-    # Requirements say 80% train, 20% validation
-    df_train, df_val = train_test_split(
+    # === PROPER 3-WAY STRATIFIED SPLIT: 70% train / 15% val / 15% test ===
+    # Step 1: Hold out test set
+    df_train_val, df_test = train_test_split(
         df, test_size=test_size, random_state=seed, stratify=df["label"]
     )
+    # Step 2: Split remaining into train/val
+    relative_val_size = val_size / (1.0 - test_size)
+    df_train, df_val = train_test_split(
+        df_train_val, test_size=relative_val_size, random_state=seed, stratify=df_train_val["label"]
+    )
 
-    logger.info(f"NLI splits — Train: {len(df_train)}, Val: {len(df_val)}")
+    logger.info(f"NLI splits — Train: {len(df_train)}, Val: {len(df_val)}, Test: {len(df_test)}")
 
     return DatasetDict(
         {
             "train": Dataset.from_pandas(df_train, preserve_index=False),
             "validation": Dataset.from_pandas(df_val, preserve_index=False),
-            "test": Dataset.from_pandas(df_val, preserve_index=False), 
+            "test": Dataset.from_pandas(df_test, preserve_index=False),
         }
     )
 

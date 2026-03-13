@@ -66,16 +66,16 @@ def extract_features(path: str) -> np.ndarray:
     features = (features - mean) / std
     
     # 6. Pad/truncate to fixed length
-    if len(features) > CONFIG["max_frames"]:
-        features = features[:CONFIG["max_frames"], :]
+    if int(len(features)) > int(CONFIG["max_frames"]):
+        features = features[:int(CONFIG["max_frames"]), :]
     else:
-        pad_width = CONFIG["max_frames"] - len(features)
+        pad_width = int(CONFIG["max_frames"]) - int(len(features))
         features = np.pad(features, ((0, pad_width), (0, 0)), mode="constant")
     
     return features
 
 def run_training():
-    output_path = Path(CONFIG["output_dir"])
+    output_path = Path(str(CONFIG["output_dir"]))
     output_path.mkdir(parents=True, exist_ok=True)
 
     logger.info("Loading TESS data for S1 baseline...")
@@ -168,9 +168,9 @@ def run_training():
         "f1_macro": round(float(f1), 4),
         "precision_macro": round(float(precision), 4),
         "recall_macro": round(float(recall), 2),
-        "train_time_minutes": round(train_time, 2),
+        "train_time_minutes": round(float(train_time), 2),
         "peak_vram_gb": 0.0,
-        "epochs_trained": len(history.history["loss"]),
+        "epochs_trained": int(len(history.history["loss"])),
         "dataset": "TESS only",
         "saved_model_path": str(output_path)
     }

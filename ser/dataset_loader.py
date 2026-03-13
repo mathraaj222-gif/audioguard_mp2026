@@ -44,7 +44,7 @@ RAVDESS_EMOTION_MAP = {
     "05": "angry", "06": "fearful", "07": "disgust", "08": "surprised",
 }
 
-def load_ravdess(cache_dir: str = "./datasets/ravdess") -> list[dict]:
+def load_ravdess(cache_dir: str = "./data/ravdess") -> list[dict]:
     cache = Path(cache_dir)
     if not cache.exists() or not list(cache.rglob("*.wav")):
         logger.info("Attempting to download RAVDESS via Kaggle API...")
@@ -64,7 +64,7 @@ def load_ravdess(cache_dir: str = "./datasets/ravdess") -> list[dict]:
                 samples.append({"path": str(wav), "label": EMOTION_LABEL_MAP[emo_str], "source": "ravdess"})
     return samples
 
-def load_tess(cache_dir: str = "./datasets/tess") -> list[dict]:
+def load_tess(cache_dir: str = "./data/tess") -> list[dict]:
     cache = Path(cache_dir)
     if not cache.exists() or not list(cache.rglob("*.wav")):
         logger.info("Attempting to download TESS via Kaggle API...")
@@ -77,11 +77,23 @@ def load_tess(cache_dir: str = "./datasets/tess") -> list[dict]:
 
     samples = []
     for wav in cache.rglob("*.wav"):
-        name_lower = wav.stem.lower()
+        # Strategy 1: Extract emotion from parent folder name (most reliable)
+        # TESS structure: .../OAF_happy/*.wav or .../YAF_angry/*.wav
+        folder_name = wav.parent.name.lower()
+        matched = False
         for emo_key, label in EMOTION_LABEL_MAP.items():
-            if f"_{emo_key}_" in f"_{name_lower}_": # Use underscores to avoid partial matches
+            if emo_key in folder_name:
                 samples.append({"path": str(wav), "label": label, "source": "tess"})
+                matched = True
                 break
+        
+        if not matched:
+            # Strategy 2: Extract emotion from filename as fallback
+            name_lower = wav.stem.lower()
+            for emo_key, label in EMOTION_LABEL_MAP.items():
+                if emo_key in name_lower:
+                    samples.append({"path": str(wav), "label": label, "source": "tess"})
+                    break
     return samples
 
 def load_iemocap(iemocap_root: Optional[str] = None) -> list[dict]:

@@ -66,8 +66,8 @@ class Wav2VecBertSERModel(nn.Module):
         # Head: Linear(1024, 7)
         self.head = nn.Linear(encoder_dim, num_labels)
 
-    def forward(self, input_features, attention_mask=None, labels=None):
-        outputs = self.w2v_bert(input_features, attention_mask=attention_mask)
+    def forward(self, input_values, attention_mask=None, labels=None):
+        outputs = self.w2v_bert(input_values, attention_mask=attention_mask)
         hidden_states = outputs.hidden_states # List of (B, T, D)
         
         # Scalar mix
@@ -114,7 +114,10 @@ def run_training():
     def preprocess_function(examples):
         audio = [x["array"] for x in examples["audio"]]
         inputs = feature_extractor(audio, sampling_rate=TARGET_SAMPLE_RATE, return_tensors="pt", padding=True, truncation=True, max_length=TARGET_SAMPLE_RATE * 10)
-        examples["input_features"] = inputs.input_features
+        # Wav2Vec-BERT expects 'input_values', not 'input_features'
+        examples["input_values"] = inputs.input_values
+        if hasattr(inputs, "attention_mask"):
+            examples["attention_mask"] = inputs.attention_mask
         return examples
 
     tokenized_ds = ds.map(preprocess_function, batched=True, batch_size=8, remove_columns=["audio", "source"])
@@ -138,6 +141,8 @@ def run_training():
         logging_steps=10,
         report_to="none",
         fp16=torch.cuda.is_available(),
+        gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
     )
 
     # Differential Learning Rates
@@ -173,15 +178,16 @@ def run_training():
     trainer.save_model(str(output_path))
     feature_extractor.save_pretrained(str(output_path))
     
-    # Unified summary
+    # Unified summary — evaluate ONCE, extract all metrics
+    test_metrics = trainer.evaluate(tokenized_ds["test"])
     summary = {
         "model_id": CONFIG["model_id"],
         "model_name": CONFIG["model_name"],
         "track": CONFIG["track"],
-        "accuracy": round(trainer.evaluate(tokenized_ds["test"])["eval_accuracy"], 4),
-        "f1_macro": round(trainer.evaluate(tokenized_ds["test"])["eval_f1_macro"], 4),
-        "precision_macro": round(trainer.evaluate(tokenized_ds["test"])["eval_precision_macro"], 4),
-        "recall_macro": round(trainer.evaluate(tokenized_ds["test"])["eval_recall_macro"], 4),
+        "accuracy": round(test_metrics["eval_accuracy"], 4),
+        "f1_macro": round(test_metrics["eval_f1_macro"], 4),
+        "precision_macro": round(test_metrics["eval_precision_macro"], 4),
+        "recall_macro": round(test_metrics["eval_recall_macro"], 4),
         "train_time_minutes": round(train_time, 2),
         "peak_vram_gb": round(peak_vram, 2),
         "epochs_trained": CONFIG["epochs"],

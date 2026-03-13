@@ -55,7 +55,7 @@ class WeightedTrainer(Trainer):
         super().__init__(*args, **kwargs)
         self.class_weights = torch.tensor(class_weights, dtype=torch.float).to(DEVICE)
 
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         labels = inputs.get("labels")
         outputs = model(**inputs)
         logits = outputs.get("logits")
@@ -76,7 +76,7 @@ def compute_metrics(eval_pred):
     }
 
 def run_training():
-    output_path = Path(CONFIG["output_dir"])
+    output_path = Path(str(CONFIG["output_dir"]))
     output_path.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Starting {CONFIG['model_id']} training on {DEVICE}...")
@@ -169,7 +169,7 @@ def run_training():
         "model_id": CONFIG["model_id"],
         "model_name": CONFIG["model_name"],
         "track": CONFIG["track"],
-        "accuracy": round(metrics["eval_accuracy"], 4),
+        "accuracy": round(float(metrics["eval_accuracy"]), 4),
         "f1_macro": round(metrics["eval_f1_macro"], 4),
         "precision_macro": round(metrics["eval_precision_macro"], 4),
         "recall_macro": round(metrics["eval_recall_macro"], 4),

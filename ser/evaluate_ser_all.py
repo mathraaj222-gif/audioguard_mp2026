@@ -35,11 +35,15 @@ MODEL_CONFIGS = {
 }
 
 def extract_mfcc(path, n_mfcc=40, max_frames=216):
+    """Extract MFCC + delta + delta-delta features to match train_lstm_baseline.py's extract_features()."""
     y, sr = librosa.load(path, sr=TARGET_SAMPLE_RATE)
-    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc).T
-    if len(mfcc) > max_frames: mfcc = mfcc[:max_frames, :]
-    else: mfcc = np.pad(mfcc, ((0, max_frames - len(mfcc)), (0, 0)), mode="constant")
-    return mfcc
+    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc)
+    delta = librosa.feature.delta(mfcc)
+    delta2 = librosa.feature.delta(mfcc, order=2)
+    features = np.concatenate([mfcc, delta, delta2], axis=0).T  # (T, 120)
+    if len(features) > max_frames: features = features[:max_frames, :]
+    else: features = np.pad(features, ((0, max_frames - len(features)), (0, 0)), mode="constant")
+    return features
 
 def run_evaluation():
     outputs_dir = Path("./outputs")

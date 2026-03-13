@@ -123,9 +123,9 @@ TCA_DEBERTA_OUTPUT   = WORKING_DIR / "outputs" / "deberta_nli_finetuned"
 SER_WHISPER_OUTPUT   = WORKING_DIR / "outputs" / "whisper_ser_finetuned"
 SER_WAV2VEC_OUTPUT   = WORKING_DIR / "outputs" / "wav2vec_bert_ser_finetuned"
 
-RAVDESS_CACHE = WORKING_DIR / "datasets" / "ravdess"
-TESS_CACHE    = WORKING_DIR / "datasets" / "tess"
-NLI_CSV_PATH  = CODE_DIR / "datasets" / "hate_speech_ethics_dataset_300.csv"
+RAVDESS_CACHE = WORKING_DIR / "data" / "ravdess"
+TESS_CACHE    = WORKING_DIR / "data" / "tess"
+NLI_CSV_PATH  = CODE_DIR / "data" / "hate_speech_ethics_dataset_300.csv"
 
 # -----------------------------------------------------------------------------
 # PHASE 0: ENVIRONMENT CHECK
@@ -316,7 +316,7 @@ def package_artifacts():
     for p in sorted(WORKING_DIR.rglob("*")):
         if p.is_file():
             size_mb = float(p.stat().st_size) / (1024**2)
-            manifest.append({"path": str(p.relative_to(WORKING_DIR)), "size_mb": round(size_mb, 2)})
+            manifest.append({"path": str(p.relative_to(WORKING_DIR)), "size_mb": round(float(size_mb), 2)})
 
     with open(WORKING_DIR / "output_manifest.json", "w") as f:
         json.dump(manifest, f, indent=2)
