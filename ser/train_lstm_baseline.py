@@ -34,24 +34,45 @@ CONFIG = {
     "track": "SER",
     "epochs": 100,
     "batch_size": 32,
-    "n_mfcc": 40,
+    "n_mfcc": 40,           # base MFCCs
+    "n_features": 120,       # 40 MFCC + 40 delta + 40 delta-delta
     "max_frames": 216,
     "output_dir": "./outputs/S1_lstm_baseline/",
 }
 
-def extract_mfcc(path: str) -> np.ndarray:
-    """Extract and pad/truncate MFCCs to (max_frames, n_mfcc)."""
+def extract_features(path: str) -> np.ndarray:
+    """
+    Extract MFCC + delta + delta-delta features, then per-sample normalize.
+    Returns shape: (max_frames, n_features) = (216, 120)
+    """
     y, sr = librosa.load(path, sr=TARGET_SAMPLE_RATE)
+    
+    # 1. Base MFCCs: (n_mfcc, frames)
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=CONFIG["n_mfcc"])
-    mfcc = mfcc.T # (frames, n_mfcc)
     
-    if len(mfcc) > CONFIG["max_frames"]:
-        mfcc = mfcc[:CONFIG["max_frames"], :]
+    # 2. Delta features (1st order temporal derivative)
+    delta = librosa.feature.delta(mfcc)
+    
+    # 3. Delta-delta features (2nd order temporal derivative)
+    delta2 = librosa.feature.delta(mfcc, order=2)
+    
+    # 4. Concatenate: (120, frames) → transpose → (frames, 120)
+    features = np.concatenate([mfcc, delta, delta2], axis=0).T
+    
+    # 5. Per-sample normalization (zero-mean, unit-variance per feature)
+    #    Critical: prevents MFCC scale differences from derailing gradients
+    mean = features.mean(axis=0, keepdims=True)
+    std  = features.std(axis=0, keepdims=True) + 1e-8
+    features = (features - mean) / std
+    
+    # 6. Pad/truncate to fixed length
+    if len(features) > CONFIG["max_frames"]:
+        features = features[:CONFIG["max_frames"], :]
     else:
-        pad_width = CONFIG["max_frames"] - len(mfcc)
-        mfcc = np.pad(mfcc, ((0, pad_width), (0, 0)), mode="constant")
+        pad_width = CONFIG["max_frames"] - len(features)
+        features = np.pad(features, ((0, pad_width), (0, 0)), mode="constant")
     
-    return mfcc
+    return features
 
 def run_training():
     output_path = Path(CONFIG["output_dir"])
@@ -63,36 +84,45 @@ def run_training():
         logger.error("No TESS samples loaded for S1. Skipping.")
         return
 
-    # Extract features
+    # Extract features (MFCC + delta + delta-delta + per-sample normalization)
     X, y = [], []
     for s in samples:
         try:
-            X.append(extract_mfcc(s["path"]))
+            X.append(extract_features(s["path"]))
             y.append(s["label"])
         except Exception as e:
             logger.warning(f"Failed to process {s['path']}: {e}")
 
-    X = np.array(X)
+    X = np.array(X)  # shape: (N, 216, 120)
     y = np.array(y)
+    logger.info(f"Feature array shape: {X.shape}, labels: {y.shape}")
+    logger.info(f"Label distribution: {dict(zip(*np.unique(y, return_counts=True)))}")
     
     # 7-class to categorical
     y_cat = tf.keras.utils.to_categorical(y, num_classes=7)
 
     X_train, X_val, y_train, y_val = train_test_split(X, y_cat, test_size=0.2, random_state=42, stratify=y)
 
-    # Model Architecture
+    # Model Architecture — with BatchNorm layers to prevent vanishing gradients
     model = models.Sequential([
-        layers.Input(shape=(CONFIG["max_frames"], CONFIG["n_mfcc"])),
+        layers.Input(shape=(CONFIG["max_frames"], CONFIG["n_features"])),  # (216, 120)
         layers.LSTM(256, return_sequences=True),
-        layers.LSTM(128),
-        layers.Dense(64, activation="relu"),
+        layers.LayerNormalization(),       # Stabilize LSTM output before second LSTM
         layers.Dropout(0.3),
+        layers.LSTM(128),
+        layers.LayerNormalization(),
+        layers.Dense(128, activation="relu"),
+        layers.Dropout(0.3),
+        layers.Dense(64, activation="relu"),
+        layers.Dropout(0.2),
         layers.Dense(7, activation="softmax")
     ])
 
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-                  loss="categorical_crossentropy",
-                  metrics=["accuracy"])
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+        loss="categorical_crossentropy",
+        metrics=["accuracy"]
+    )
 
     model.summary()
 
