@@ -129,11 +129,14 @@ def load_nli_csv(
         
         parent_dir = Path(__file__).resolve().parent.parent
         candidates = [
+            # 0. Same directory as this script (works when CSV is copied into tca/ on Kaggle)
+            Path(__file__).resolve().parent / filename,
             parent_dir / "data_bundle" / filename,
             parent_dir / "datasets" / filename,
             Path("/kaggle/input/audioguars-mp2026/data_bundle") / filename,
             Path("/kaggle/input/audioguars-mp2026/datasets") / filename,
-            _DEFAULT_NLI_CSV
+            Path("/kaggle/working/datasets") / filename,
+            _DEFAULT_NLI_CSV,
         ]
         
         path = None

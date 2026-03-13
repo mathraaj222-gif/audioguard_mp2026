@@ -70,8 +70,8 @@ class Wav2Vec2RobustSERModel(nn.Module):
             nn.Linear(256, num_labels)
         )
 
-    def forward(self, input_features, attention_mask=None, labels=None):
-        outputs = self.wav2vec2(input_features, attention_mask=attention_mask)
+    def forward(self, input_values, attention_mask=None, labels=None):
+        outputs = self.wav2vec2(input_values, attention_mask=attention_mask)
         # pooled = outputs.last_hidden_state[:, 0, :] # Use CLS-like or mean pooling
         pooled = torch.mean(outputs.last_hidden_state, dim=1)
         

@@ -81,8 +81,8 @@ def run_training():
         num_labels=7,
         ignore_mismatched_sizes=True
     )
-    # Freeze CNN feature extractor
-    model.freeze_feature_extractor()
+    # Freeze CNN feature extractor (freeze_feature_extractor() was deprecated; use internal method)
+    model.wav2vec2.feature_extractor._freeze_parameters()
     model.to(DEVICE)
 
     # 3. Training Args

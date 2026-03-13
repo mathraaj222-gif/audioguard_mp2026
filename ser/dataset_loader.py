@@ -96,7 +96,7 @@ def load_iemocap(iemocap_root: Optional[str] = None) -> list[dict]:
     logger.info(f"IEMOCAP located at {root}, but full parsing logic skipped to preserve focus on Kaggle build.")
     return samples
 
-def load_ser_datasets(test_size: float = 0.20, seed: int = 42) -> DatasetDict:
+def load_ser_datasets(val_size: float = 0.15, test_size: float = 0.15, seed: int = 42) -> DatasetDict:
     all_samples = []
     all_samples.extend(load_ravdess())
     all_samples.extend(load_tess())
@@ -109,20 +109,32 @@ def load_ser_datasets(test_size: float = 0.20, seed: int = 42) -> DatasetDict:
     logger.info(f"Loaded {len(df)} samples across all sources.")
     logger.info(f"Label distribution:\n{df['label'].value_counts().to_string()}")
 
-    # Stratified Splits
-    df_train, df_test = train_test_split(df, test_size=test_size, random_state=seed, stratify=df["label"])
-    
-    def to_hf_dataset(dataframe):
-        return Dataset.from_pandas(dataframe, preserve_index=False).cast_column("audio", Audio(sampling_rate=TARGET_SAMPLE_RATE))
+    # === PROPER 3-WAY STRATIFIED SPLIT: 70% train / 15% val / 15% test ===
+    # Step 1: Hold out test set
+    df_train_val, df_test = train_test_split(
+        df, test_size=test_size, random_state=seed, stratify=df["label"]
+    )
+    # Step 2: Split remaining into train/val
+    relative_val_size = val_size / (1.0 - test_size)  # e.g. 0.15 / 0.85 ≈ 0.176
+    df_train, df_val = train_test_split(
+        df_train_val, test_size=relative_val_size, random_state=seed, stratify=df_train_val["label"]
+    )
 
-    # Add audio column (path mapping)
-    df_train["audio"] = df_train["path"]
-    df_test["audio"] = df_test["path"]
+    logger.info(f"SER splits — Train: {len(df_train)}, Val: {len(df_val)}, Test: {len(df_test)}")
+
+    # Add audio column (path mapping) and drop original path column
+    for split_df in [df_train, df_val, df_test]:
+        split_df["audio"] = split_df["path"]
+
+    # Drop 'path' column (no longer needed — audio column holds the path)
+    df_train = df_train.drop(columns=["path"])
+    df_val   = df_val.drop(columns=["path"])
+    df_test  = df_test.drop(columns=["path"])
 
     ds = DatasetDict({
-        "train": Dataset.from_pandas(df_train, preserve_index=False).cast_column("audio", Audio(sampling_rate=TARGET_SAMPLE_RATE)),
-        "test": Dataset.from_pandas(df_test, preserve_index=False).cast_column("audio", Audio(sampling_rate=TARGET_SAMPLE_RATE)),
-        "validation": Dataset.from_pandas(df_test, preserve_index=False).cast_column("audio", Audio(sampling_rate=TARGET_SAMPLE_RATE))
+        "train":      Dataset.from_pandas(df_train, preserve_index=False).cast_column("audio", Audio(sampling_rate=TARGET_SAMPLE_RATE)),
+        "validation": Dataset.from_pandas(df_val,   preserve_index=False).cast_column("audio", Audio(sampling_rate=TARGET_SAMPLE_RATE)),
+        "test":       Dataset.from_pandas(df_test,  preserve_index=False).cast_column("audio", Audio(sampling_rate=TARGET_SAMPLE_RATE)),
     })
 
     return ds
